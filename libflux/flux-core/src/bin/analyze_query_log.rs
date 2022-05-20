@@ -16,10 +16,15 @@ fn main() -> Result<()> {
 
     let connection = rusqlite::Connection::open(&app.database)?;
 
-    let stdlib_path = PathBuf::from("../stdlib");
-    let (prelude, imports, _sem_pkgs) = semantic::bootstrap::infer_stdlib_dir(&stdlib_path)?;
+    let config = semantic::AnalyzerConfig {
+        features: vec![semantic::Feature::LabelPolymorphism],
+    };
 
-    let mut analyzer = Analyzer::new((&prelude).into(), &imports, Default::default());
+    let stdlib_path = PathBuf::from("../stdlib");
+    let (prelude, imports, _sem_pkgs) =
+        semantic::bootstrap::infer_stdlib_dir(&stdlib_path, config.clone())?;
+
+    let mut analyzer = Analyzer::new((&prelude).into(), &imports, config);
     for source in connection
         .prepare("SELECT source FROM query limit 100")?
         .query_map([], |row| row.get(0))?
