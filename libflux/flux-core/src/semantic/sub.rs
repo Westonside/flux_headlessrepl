@@ -253,25 +253,33 @@ pub trait Substitutable {
         Self: Sized;
 
     /// Get all free type variables in a type.
-    fn free_vars(&self) -> Vec<Tvar>
+    fn free_vars(&self, sub: &mut Substitution) -> Vec<Tvar>
     where
         Self: Sized,
     {
-        #[derive(Default)]
-        struct FreeVars {
+        struct FreeVars<'a> {
             vars: Vec<Tvar>,
+            sub: &'a mut Substitution,
         }
 
-        impl Substituter for FreeVars {
+        impl Substituter for FreeVars<'_> {
             fn try_apply(&mut self, var: Tvar) -> Option<MonoType> {
-                if let Err(i) = self.vars.binary_search(&var) {
-                    self.vars.insert(i, var);
+                match self.sub.try_apply(var) {
+                    Some(typ) => typ.visit(self),
+                    None => {
+                        if let Err(i) = self.vars.binary_search(&var) {
+                            self.vars.insert(i, var);
+                        }
+                        None
+                    }
                 }
-                None
             }
         }
 
-        let mut free_vars = FreeVars::default();
+        let mut free_vars = FreeVars {
+            vars: Vec::new(),
+            sub,
+        };
 
         self.visit(&mut free_vars);
 

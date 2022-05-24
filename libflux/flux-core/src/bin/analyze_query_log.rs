@@ -8,13 +8,15 @@ use fluxcore::semantic::{self, Analyzer};
 #[derive(Debug, StructOpt)]
 #[structopt(about = "analyze a query log database")]
 struct AnalyzeQueryLog {
+    #[structopt(long, help = "How many sources to skip")]
+    skip: Option<usize>,
     database: PathBuf,
 }
 
 fn main() -> Result<()> {
-    let app = AnalyzeQueryLog::from_args();
+    env_logger::init();
 
-    let connection = rusqlite::Connection::open(&app.database)?;
+    let app = AnalyzeQueryLog::from_args();
 
     let label_polymorphism_config = semantic::AnalyzerConfig {
         features: vec![semantic::Feature::LabelPolymorphism],
@@ -40,17 +42,52 @@ fn main() -> Result<()> {
         label_polymorphism_config.clone(),
     );
 
+    if app.database.extension() == Some(std::ffi::OsStr::new("flux")) {
+        let source = std::fs::read_to_string(&app.database)?;
+        label_polymorphism_analyzer
+            .analyze_source("".into(), "".into(), &source)
+            .map_err(|err| err.error.pretty_error())?;
+        return Ok(());
+    }
+
+    let connection = rusqlite::Connection::open(&app.database)?;
+
     let mut count = 0;
-    for source in connection
-        .prepare("SELECT source FROM query limit 100")?
+    for (i, source) in connection
+        .prepare("SELECT source FROM query limit 10000")?
         .query_map([], |row| row.get(0))?
+        .enumerate()
     {
+        if let Some(skip) = app.skip {
+            if i < skip {
+                continue;
+            }
+        }
+
         let source: String = source?;
 
-        let current_result = analyzer.analyze_source("".into(), "".into(), &source);
+        // eprintln!("{}", source);
 
-        let label_polymorphism_result =
-            label_polymorphism_analyzer.analyze_source("".into(), "".into(), &source);
+        let analyzer = std::panic::AssertUnwindSafe(&mut analyzer);
+        let current_result = match std::panic::catch_unwind(|| {
+            let analyzer = analyzer;
+            analyzer.0.analyze_source("".into(), "".into(), &source)
+        }) {
+            Ok(x) => x,
+            Err(_) => panic!("Panic at source {}: {}", i, source),
+        };
+
+        let label_polymorphism_analyzer =
+            std::panic::AssertUnwindSafe(&mut label_polymorphism_analyzer);
+        let label_polymorphism_result = match std::panic::catch_unwind(|| {
+            let label_polymorphism_analyzer = label_polymorphism_analyzer;
+            label_polymorphism_analyzer
+                .0
+                .analyze_source("".into(), "".into(), &source)
+        }) {
+            Ok(x) => x,
+            Err(_) => panic!("Panic at source {}: {}", i, source),
+        };
 
         match (current_result, label_polymorphism_result) {
             (Ok(_), Ok(_)) => (),
@@ -73,26 +110,32 @@ fn main() -> Result<()> {
                 eprintln!("-------------------------------");
             }
             (Err(current_err), Err(label_polymorphism_err)) => {
-                let current_err = current_err.error.pretty(&source);
-                let label_polymorphism_err = label_polymorphism_err.error.pretty(&source);
-                if current_err != label_polymorphism_err {
-                    eprintln!("{}", source);
+                if false {
+                    let current_err = current_err.error.pretty(&source);
+                    let label_polymorphism_err = label_polymorphism_err.error.pretty(&source);
+                    if current_err != label_polymorphism_err {
+                        eprintln!("{}", source);
 
-                    eprintln!(
-                        "Different when label polymorphism is enabled:\n{}",
-                        pretty_assertions::StrComparison::new(
-                            &current_err,
-                            &label_polymorphism_err,
-                        )
-                    );
-                    eprintln!("-------------------------------");
+                        eprintln!(
+                            "Different when label polymorphism is enabled:\n{}",
+                            pretty_assertions::StrComparison::new(
+                                &current_err,
+                                &label_polymorphism_err,
+                            )
+                        );
+                        eprintln!("-------------------------------");
+                    }
                 }
             }
         }
         count += 1;
+
+        if count % 100 == 0 {
+            eprintln!("Checked {} queries", count);
+        }
     }
 
-    eprintln!("Checked {} queries", count);
+    eprintln!("Done! Checked {} queries", count);
 
     Ok(())
 }

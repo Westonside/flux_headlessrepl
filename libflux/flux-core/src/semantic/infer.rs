@@ -295,7 +295,7 @@ pub(crate) fn temporary_generalize(
     }
 
     let mut generalize = Generalize {
-        env_free_vars: env.free_vars(),
+        env_free_vars: env.free_vars(sub),
         vars: Default::default(),
     };
     let t = t.apply(&mut generalize);
@@ -354,7 +354,7 @@ pub fn generalize(env: &Environment, sub: &mut Substitution, t: MonoType) -> Pol
     }
 
     let mut generalize = Generalize {
-        env_free_vars: env.free_vars(),
+        env_free_vars: env.free_vars(sub),
         sub,
         vars: Default::default(),
     };
