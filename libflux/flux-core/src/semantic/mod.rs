@@ -601,8 +601,20 @@ impl<'env, I: import::Importer> Analyzer<'env, I> {
     ) -> SalvageResult<(PackageExports, nodes::Package), FileErrors> {
         let mut errors = Errors::new();
 
-        if let Err(err) = ast::check::check(ast::walk::Node::Package(ast_pkg)) {
+        if let Err((err, fatal_error)) = ast::check::check(ast::walk::Node::Package(ast_pkg)) {
             errors.extend(err.into_iter().map(Error::from));
+            if let Some(fatal_error) = fatal_error {
+                errors.push(Error::from(fatal_error));
+
+                return Err(Salvage {
+                    error: FileErrors {
+                        file: ast_pkg.package.clone(),
+                        source: None,
+                        errors,
+                    },
+                    value: None,
+                });
+            }
         }
 
         let (mut sem_pkg, package_info) = {
