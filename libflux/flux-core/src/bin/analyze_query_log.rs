@@ -54,7 +54,7 @@ fn main() -> Result<()> {
 
     let mut count = 0;
     for (i, source) in connection
-        .prepare("SELECT source FROM query limit 10000")?
+        .prepare("SELECT source FROM query limit 100000")?
         .query_map([], |row| row.get(0))?
         .enumerate()
     {
