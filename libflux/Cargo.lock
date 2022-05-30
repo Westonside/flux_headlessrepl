@@ -418,6 +418,7 @@ dependencies = [
  "codespan-reporting",
  "colored",
  "criterion",
+ "crossbeam-channel",
  "csv",
  "derivative",
  "derive_more",
