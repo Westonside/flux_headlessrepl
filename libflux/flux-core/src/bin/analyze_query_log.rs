@@ -11,6 +11,13 @@ use fluxcore::semantic::{self, Analyzer};
 struct AnalyzeQueryLog {
     #[structopt(long, help = "How many sources to skip")]
     skip: Option<usize>,
+    #[structopt(
+        long,
+        required = true,
+        min_values = 1,
+        help = "Which new features to compare against"
+    )]
+    new_features: Vec<semantic::Feature>,
     database: PathBuf,
 }
 
@@ -19,8 +26,8 @@ fn main() -> Result<()> {
 
     let app = AnalyzeQueryLog::from_args();
 
-    let label_polymorphism_config = semantic::AnalyzerConfig {
-        features: vec![semantic::Feature::LabelPolymorphism],
+    let new_config = semantic::AnalyzerConfig {
+        features: app.new_features,
     };
 
     let stdlib_path = PathBuf::from("../stdlib");
@@ -37,19 +44,13 @@ fn main() -> Result<()> {
     };
 
     let (prelude, imports, _sem_pkgs) =
-        semantic::bootstrap::infer_stdlib_dir(&stdlib_path, label_polymorphism_config.clone())?;
+        semantic::bootstrap::infer_stdlib_dir(&stdlib_path, new_config.clone())?;
 
-    let label_polymorphism_analyzer = || {
-        Analyzer::new(
-            (&prelude).into(),
-            &imports,
-            label_polymorphism_config.clone(),
-        )
-    };
+    let new_analyzer = || Analyzer::new((&prelude).into(), &imports, new_config.clone());
 
     if app.database.extension() == Some(std::ffi::OsStr::new("flux")) {
         let source = std::fs::read_to_string(&app.database)?;
-        label_polymorphism_analyzer()
+        new_analyzer()
             .analyze_source("".into(), "".into(), &source)
             .map_err(|err| err.error.pretty_error())?;
         return Ok(());
@@ -95,21 +96,21 @@ fn main() -> Result<()> {
                         Err(_) => panic!("Panic at source {}: {}", i, source),
                     };
 
-                    let label_polymorphism_result = match std::panic::catch_unwind(|| {
-                        label_polymorphism_analyzer().analyze_source("".into(), "".into(), &source)
+                    let new_result = match std::panic::catch_unwind(|| {
+                        new_analyzer().analyze_source("".into(), "".into(), &source)
                     }) {
                         Ok(x) => x,
                         Err(_) => panic!("Panic at source {}: {}", i, source),
                     };
 
-                    match (current_result, label_polymorphism_result) {
+                    match (current_result, new_result) {
                         (Ok(_), Ok(_)) => (),
                         (Err(err), Ok(_)) => {
                             eprintln!("### {}", i);
                             eprintln!("{}", source);
 
                             eprintln!(
-                                "Missing errors when label polymorphism is enabled: {}",
+                                "Missing errors when the features are enabled: {}",
                                 err.error.pretty(&source)
                             );
                             eprintln!("-------------------------------");
@@ -119,24 +120,23 @@ fn main() -> Result<()> {
                             eprintln!("{}", source);
 
                             eprintln!(
-                                "New errors when label polymorphism is enabled: {}",
+                                "New errors when the features are enabled: {}",
                                 err.error.pretty(&source)
                             );
                             eprintln!("-------------------------------");
                         }
-                        (Err(current_err), Err(label_polymorphism_err)) => {
+                        (Err(current_err), Err(new_err)) => {
                             if false {
                                 let current_err = current_err.error.pretty(&source);
-                                let label_polymorphism_err =
-                                    label_polymorphism_err.error.pretty(&source);
-                                if current_err != label_polymorphism_err {
+                                let new_err = new_err.error.pretty(&source);
+                                if current_err != new_err {
                                     eprintln!("{}", source);
 
                                     eprintln!(
-                                        "Different when label polymorphism is enabled:\n{}",
+                                        "Different when the new features are enabled:\n{}",
                                         pretty_assertions::StrComparison::new(
                                             &current_err,
-                                            &label_polymorphism_err,
+                                            &new_err,
                                         )
                                     );
                                     eprintln!("-------------------------------");
