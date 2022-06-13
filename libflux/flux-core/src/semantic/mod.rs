@@ -609,7 +609,10 @@ impl<'env, I: import::Importer> Analyzer<'env, I> {
                     error: FileErrors {
                         file: ast_pkg.package.clone(),
                         source: None,
-                        errors,
+                        diagnostics: Diagnostics {
+                            errors,
+                            warnings: Default::default(),
+                        },
                     },
                     value: None,
                 });
