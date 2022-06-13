@@ -526,6 +526,24 @@ impl<'a> Converter<'a> {
         })
     }
     fn convert_testcase(&mut self, package: &str, stmt: &ast::TestCaseStmt) -> TestCaseStmt {
+        let mut body = stmt
+            .block
+            .body
+            .iter()
+            .filter_map(|s| self.convert_statement(package, s))
+            .collect::<Vec<_>>();
+
+        // HACK Move all builtins first in the file so that any references to them use
+        // any feature overriden builtin definitions
+        body.sort_by(|l, r| {
+            use std::cmp::Ordering;
+            match (l, r) {
+                (Statement::Builtin(_), _) => Ordering::Less,
+                (_, Statement::Builtin(_)) => Ordering::Greater,
+                _ => Ordering::Equal,
+            }
+        });
+
         TestCaseStmt {
             loc: stmt.base.location.clone(),
             id: self.convert_identifier(&stmt.id),
@@ -533,12 +551,7 @@ impl<'a> Converter<'a> {
                 .extends
                 .as_ref()
                 .map(|e| self.convert_string_literal(e)),
-            body: stmt
-                .block
-                .body
-                .iter()
-                .filter_map(|s| self.convert_statement(package, s))
-                .collect(),
+            body,
         }
     }
 
