@@ -411,11 +411,7 @@ impl<'a> Converter<'a> {
             .iter()
             .map(|i| self.convert_import_declaration(i))
             .collect::<Vec<ImportDeclaration>>();
-        let body = file
-            .body
-            .iter()
-            .filter_map(|s| self.convert_statement(package_name, s))
-            .collect::<Vec<Statement>>();
+        let body = self.convert_statements(package_name, &file.body);
 
         File {
             loc: file.base.location.clone(),
@@ -457,6 +453,13 @@ impl<'a> Converter<'a> {
             path,
             import_symbol,
         }
+    }
+
+    fn convert_statements(&mut self, package: &str, stmts: &[ast::Statement]) -> Vec<Statement> {
+        stmts
+            .iter()
+            .filter_map(|s| self.convert_statement(package, s))
+            .collect::<Vec<_>>()
     }
 
     fn convert_statement(&mut self, package: &str, stmt: &ast::Statement) -> Option<Statement> {
@@ -526,24 +529,6 @@ impl<'a> Converter<'a> {
         })
     }
     fn convert_testcase(&mut self, package: &str, stmt: &ast::TestCaseStmt) -> TestCaseStmt {
-        let mut body = stmt
-            .block
-            .body
-            .iter()
-            .filter_map(|s| self.convert_statement(package, s))
-            .collect::<Vec<_>>();
-
-        // HACK Move all builtins first in the file so that any references to them use
-        // any feature overriden builtin definitions
-        body.sort_by(|l, r| {
-            use std::cmp::Ordering;
-            match (l, r) {
-                (Statement::Builtin(_), _) => Ordering::Less,
-                (_, Statement::Builtin(_)) => Ordering::Greater,
-                _ => Ordering::Equal,
-            }
-        });
-
         TestCaseStmt {
             loc: stmt.base.location.clone(),
             id: self.convert_identifier(&stmt.id),
@@ -551,7 +536,7 @@ impl<'a> Converter<'a> {
                 .extends
                 .as_ref()
                 .map(|e| self.convert_string_literal(e)),
-            body,
+            body: self.convert_statements(package, &stmt.block.body),
         }
     }
 
