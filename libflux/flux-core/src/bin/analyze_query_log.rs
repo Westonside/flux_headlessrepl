@@ -13,8 +13,8 @@ struct AnalyzeQueryLog {
     skip: Option<usize>,
     #[structopt(
         long,
-        required = true,
         min_values = 1,
+        use_delimiter = true,
         help = "Which new features to compare against"
     )]
     new_features: Vec<semantic::Feature>,
@@ -48,15 +48,36 @@ fn main() -> Result<()> {
 
     let new_analyzer = || Analyzer::new((&prelude).into(), &imports, new_config.clone());
 
-    if app.database.extension() == Some(std::ffi::OsStr::new("flux")) {
-        let source = std::fs::read_to_string(&app.database)?;
-        new_analyzer()
-            .analyze_source("".into(), "".into(), &source)
-            .map_err(|err| err.error.pretty_error())?;
-        return Ok(());
-    }
+    let sources: Box<dyn FnOnce() -> Result<Box<dyn Iterator<Item = Result<String>>>> + Send> =
+        match app.database.extension().and_then(|e| e.to_str()) {
+            Some("flux") => {
+                let source = std::fs::read_to_string(&app.database)?;
+                new_analyzer()
+                    .analyze_source("".into(), "".into(), &source)
+                    .map_err(|err| err.error.pretty_error())?;
+                return Ok(());
+            }
+            Some("csv") => {
+                let mut reader = csv::Reader::from_path(&app.database)?;
 
-    let connection = rusqlite::Connection::open(&app.database)?;
+                Box::new(move || {
+                    Ok(Box::new(reader.records().map(|record| {
+                        Ok::<_, Error>(record?.get(0).unwrap().into())
+                    })))
+                })
+            }
+            _ => {
+                let connection = rusqlite::Connection::open(&app.database)?;
+                Box::new(move || {
+                    Ok(Box::new(
+                        connection
+                            .prepare("SELECT source FROM query limit 100000")?
+                            .query_map([], |row| row.get(0))?
+                            .map(|e| e.map_err(Error::from)),
+                    ))
+                })
+            }
+        };
 
     let (tx, rx) = crossbeam_channel::bounded(128);
 
@@ -66,11 +87,7 @@ fn main() -> Result<()> {
 
     let (r, r2, _) = join3(
         move || {
-            for (i, result) in connection
-                .prepare("SELECT source FROM query limit 100000")?
-                .query_map([], |row| row.get(0))?
-                .enumerate()
-            {
+            for (i, result) in sources()?.enumerate() {
                 if let Some(skip) = app.skip {
                     if i < skip {
                         continue;

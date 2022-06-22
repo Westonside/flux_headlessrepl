@@ -12,7 +12,7 @@ crate-type = ["rlib"]
 name = "analyze_query_log"
 test = false
 bench = false
-required-features = ["crossbeam-channel", "rayon", "rusqlite", "pretty_assertions"]
+required-features = ["crossbeam-channel", "csv", "rayon", "rusqlite", "pretty_assertions"]
 
 [[bin]]
 name = "fluxdoc"
