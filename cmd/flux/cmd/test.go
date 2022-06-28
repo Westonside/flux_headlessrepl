@@ -786,7 +786,7 @@ func (t *TestReporter) Summarize(tests []*Test) {
 		fmt.Printf("\nfailures:\n\n")
 		for _, test := range tests {
 			if err := test.Error(); err != nil {
-				fmt.Fprintf(color.Output, "\t%s ... %s: %s\n", test.FullName(), color.RedString("fail"), err)
+				fmt.Fprintf(color.Output, "\t%s ... %s: %s\n\n", test.FullName(), color.RedString("fail"), err)
 			}
 		}
 	}
