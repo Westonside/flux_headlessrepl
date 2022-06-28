@@ -49,13 +49,13 @@ yesterday = () => {
 
 _timezone_convert = (s) => {
     t = int(v: location.offset)
-    as = if t == 0 then 0h else duration(v: -t)
+    as = duration(v:-t)
+    adj = if t == int(v: 0ns) then date.truncate(t: s, unit: 1d) 
+    else //in the case of else then the offset has been set by `timezone.fixed`
+    if t > 0 then date.add(d:as, to: s) 
+    else date.add(d: duration(v: int(v: as) - int(v: 1d)), to: s)
 
-    return
-        if t >= 0 then
-            date.add(d: as, to: s)
-        else
-            date.add(d: duration(v: int(v: as) - int(v: 1d)), to: s)
+    return adj
 }
 
 _day_finder = (td, func, offset=0h) => {
@@ -387,7 +387,11 @@ sunday = () => {
 //
 month = (month_offset=0) => {
     s = date.truncate(t: today(), unit: 1mo)
-    as = _timezone_convert(s: s)
+    // if the timezone offset is not 0 then timezone convert else truncate
+    as = if int(v: location.offset) != int(v: 0ns) then _timezone_convert(s:s)
+    else date.truncate(t: s, unit: 1d)
+    // as = _timezone_convert(s: s)
+
     start = date.add(d: date.scale(d: 1mo, n: month_offset), to: as)
 
     return {start: start, stop: date.add(d: 1mo, to: start)}
