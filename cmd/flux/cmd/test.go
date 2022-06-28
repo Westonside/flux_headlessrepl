@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fatih/color"
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/ast"
 	"github.com/influxdata/flux/ast/astutil"
@@ -745,33 +746,27 @@ func NewTestReporter(verbosity int) TestReporter {
 func (t *TestReporter) ReportTestRun(test *Test) {
 	if t.verbosity == 0 {
 		if test.skip {
-			fmt.Print("s")
+			fmt.Fprintf(color.Output, color.YellowString("s"))
 		} else if test.Error() != nil {
-			fmt.Print("x")
+			fmt.Fprintf(color.Output, color.RedString("x"))
 		} else {
-			fmt.Print(".")
-		}
-	} else if t.verbosity == 1 {
-		if test.skip {
-			fmt.Printf("%s...skip\n", test.FullName())
-		} else if err := test.Error(); err != nil {
-			fmt.Printf("%s...fail: %s\n", test.FullName(), err)
-		} else {
-			fmt.Printf("%s...success\n", test.FullName())
+			fmt.Fprintf(color.Output, color.GreenString("."))
 		}
 	} else {
-		source, err := test.SourceCode()
-		if err != nil {
-			fmt.Printf("failed to get source for test %s: %s\n", test.FullName(), err)
-		} else {
-			fmt.Printf("Full source for test case %q\n%s", test.FullName(), source)
+		if t.verbosity != 1 {
+			source, err := test.SourceCode()
+			if err != nil {
+				fmt.Printf("failed to get source for test %s: %s\n", test.FullName(), err)
+			} else {
+				fmt.Printf("Full source for test case %q\n%s", test.FullName(), source)
+			}
 		}
 		if test.skip {
-			fmt.Printf("%s...skip\n", test.FullName())
+			fmt.Fprintf(color.Output, "%s ... %s\n", test.FullName(), color.YellowString("skip"))
 		} else if err := test.Error(); err != nil {
-			fmt.Printf("%s...fail: %s\n", test.FullName(), err)
+			fmt.Fprintf(color.Output, "%s ... %s: %s\n", test.FullName(), color.RedString("fail"), err)
 		} else {
-			fmt.Printf("%s...success\n", test.FullName())
+			fmt.Fprintf(color.Output, "%s ... %s\n", test.FullName(), color.GreenString("success"))
 		}
 	}
 }
@@ -791,7 +786,7 @@ func (t *TestReporter) Summarize(tests []*Test) {
 		fmt.Printf("\nfailures:\n\n")
 		for _, test := range tests {
 			if err := test.Error(); err != nil {
-				fmt.Printf("\t%s...fail: %s\n", test.FullName(), err)
+				fmt.Fprintf(color.Output, "\t%s ... %s: %s\n", test.FullName(), color.RedString("fail"), err)
 			}
 		}
 	}
