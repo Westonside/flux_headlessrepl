@@ -746,11 +746,11 @@ func NewTestReporter(verbosity int) TestReporter {
 func (t *TestReporter) ReportTestRun(test *Test) {
 	if t.verbosity == 0 {
 		if test.skip {
-			fmt.Fprintf(color.Output, color.YellowString("s"))
+			fmt.Fprint(color.Output, color.YellowString("s"))
 		} else if test.Error() != nil {
-			fmt.Fprintf(color.Output, color.RedString("x"))
+			fmt.Fprint(color.Output, color.RedString("x"))
 		} else {
-			fmt.Fprintf(color.Output, color.GreenString("."))
+			fmt.Fprint(color.Output, color.GreenString("."))
 		}
 	} else {
 		if t.verbosity != 1 {
