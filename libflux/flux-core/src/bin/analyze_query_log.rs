@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
-use anyhow::{Error, Result};
+use anyhow::{anyhow, Context as _, Error, Result};
 use rayon::prelude::*;
+use serde::Deserialize;
 use structopt::StructOpt;
 
 use fluxcore::semantic::{self, Analyzer};
@@ -19,6 +20,52 @@ struct AnalyzeQueryLog {
     )]
     new_features: Vec<semantic::Feature>,
     database: PathBuf,
+}
+
+trait Source {
+    fn read(&mut self) -> Result<Box<dyn Iterator<Item = Result<String>> + '_>>;
+}
+
+impl Source for rusqlite::Statement<'_> {
+    fn read(&mut self) -> Result<Box<dyn Iterator<Item = Result<String>> + '_>> {
+        Ok(Box::new(
+            self.query_map([], |row| row.get(0))?
+                .map(|e| e.map_err(Error::from)),
+        ))
+    }
+}
+
+impl<R> Source for csv::Reader<R>
+where
+    R: io::Read + Send,
+{
+    fn read(&mut self) -> Result<Box<dyn Iterator<Item = Result<String>> + '_>> {
+        let headers = self.headers()?;
+        let i = headers
+            .iter()
+            .position(|field| field == "_value")
+            .ok_or_else(|| anyhow!("Missing _value field"))?;
+
+        #[derive(Deserialize, Debug)]
+        struct QueryLogValue {
+            request: QueryLogRequest,
+        }
+        #[derive(Deserialize, Debug)]
+        struct QueryLogRequest {
+            compiler: QueryLogCompiler,
+        }
+        #[derive(Deserialize, Debug)]
+        struct QueryLogCompiler {
+            query: String,
+        }
+
+        Ok(Box::new(self.records().map(move |record| {
+            let record = record?;
+            let s = record.get(i).unwrap();
+            let value = serde_json::from_str::<QueryLogValue>(s)?;
+            Ok::<_, Error>(value.request.compiler.query)
+        })))
+    }
 }
 
 fn main() -> Result<()> {
@@ -48,7 +95,9 @@ fn main() -> Result<()> {
 
     let new_analyzer = || Analyzer::new((&prelude).into(), &imports, new_config.clone());
 
-    let sources: Box<dyn FnOnce() -> Result<Box<dyn Iterator<Item = Result<String>>>> + Send> =
+    let mut connection;
+
+    let sources: Box<dyn FnOnce() -> Box<dyn Source> + Send> =
         match app.database.extension().and_then(|e| e.to_str()) {
             Some("flux") => {
                 let source = std::fs::read_to_string(&app.database)?;
@@ -58,23 +107,44 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             Some("csv") => {
-                let mut reader = csv::Reader::from_path(&app.database)?;
+                let input = std::fs::read_to_string(&app.database)
+                    .with_context(|| format!("`{}` could not be read", app.database.display()))?;
 
-                Box::new(move || {
-                    Ok(Box::new(reader.records().map(|record| {
-                        Ok::<_, Error>(record?.get(0).unwrap().into())
-                    })))
-                })
+                // The flux csv format has extra headers which we remove before parsing the csv
+                let mut first = true;
+                let input = input
+                    .lines()
+                    .filter(|line| {
+                        if line.starts_with(",result") {
+                            if first {
+                                first = false;
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            true
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\r\n");
+
+                let reader = csv::ReaderBuilder::new()
+                    .comment(Some(b'#'))
+                    .flexible(true)
+                    .from_reader(std::io::Cursor::new(input.into_bytes()));
+
+                Box::new(move || Box::new(reader))
             }
             _ => {
-                let connection = rusqlite::Connection::open(&app.database)?;
+                connection = rusqlite::Connection::open(&app.database)?;
+                let connection = &mut connection;
                 Box::new(move || {
-                    Ok(Box::new(
+                    Box::new(
                         connection
-                            .prepare("SELECT source FROM query limit 100000")?
-                            .query_map([], |row| row.get(0))?
-                            .map(|e| e.map_err(Error::from)),
-                    ))
+                            .prepare("SELECT source FROM query limit 100000")
+                            .unwrap(),
+                    )
                 })
             }
         };
@@ -85,9 +155,9 @@ fn main() -> Result<()> {
 
     let mut count = 0;
 
-    let (r, r2, _) = join3(
+    let (r, r2, ()) = join3(
         move || {
-            for (i, result) in sources()?.enumerate() {
+            for (i, result) in sources().read()?.enumerate() {
                 if let Some(skip) = app.skip {
                     if i < skip {
                         continue;
