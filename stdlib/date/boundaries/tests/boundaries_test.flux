@@ -256,10 +256,11 @@ testcase thursday_test_tzt_timeable {
 
     testing.diff(want: want, got: got)
 }
+
 // Africa/Algiers
 testcase thursday_test_tzts_timeableasdffff {
     option now = () => 2022-01-21T12:10:11Z
-    option location = timezone.location(name:"Africa/Algiers")
+    option location = timezone.location(name: "Africa/Algiers")
 
     //Morocco
     ret = boundaries.thursday()
@@ -269,7 +270,6 @@ testcase thursday_test_tzts_timeableasdffff {
 
     testing.diff(want: want, got: got)
 }
-
 
 testcase friday_test_one_timeable {
     option now = () => 2022-01-23T12:10:11Z
@@ -359,7 +359,6 @@ testcase sunday_test_two_timeable {
 
     testing.diff(want: want, got: got)
 }
-
 
 testcase monday_test_tz_named_st {
     // DST begins March 14, ends Nov 7.
