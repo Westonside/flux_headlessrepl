@@ -713,8 +713,8 @@ mod tests {
                 }
                 MonoType::Fun(f) => {
                     let f = Ptr::make_mut(f);
-                    for (_, mut v) in f.req.iter_mut() {
-                        self.normalize(&mut v);
+                    for (_, v) in f.req.iter_mut() {
+                        self.normalize(v);
                     }
                     for (_, v) in f.opt.iter_mut() {
                         self.normalize(&mut v.typ);
@@ -794,7 +794,7 @@ g = () => v.sweet
 x = g()
 vstr = v.str + "hello"
 "#;
-        let mut p = Parser::new(&source);
+        let mut p = Parser::new(source);
         let pkg: ast::Package = p.parse_file("".to_string()).into();
         let mut t = find_var_type(&pkg, "v".into()).expect("Should be able to get a MonoType.");
         let mut v = MonoTypeNormalizer::new();
@@ -851,7 +851,7 @@ vstr = v.str + "hello"
         let source = r#"
 vint = v + 2
 "#;
-        let mut p = Parser::new(&source);
+        let mut p = Parser::new(source);
         let pkg: ast::Package = p.parse_file("".to_string()).into();
         let t = find_var_type(&pkg, "v".into()).expect("Should be able to get a MonoType.");
         assert_eq!(t, MonoType::INT);
@@ -866,7 +866,7 @@ vint = v.int + 2
 o = {v with x: 256}
 p = o.ethan
 "#;
-        let mut p = Parser::new(&source);
+        let mut p = Parser::new(source);
         let pkg: ast::Package = p.parse_file("".to_string()).into();
         let mut t = find_var_type(&pkg, "v".into()).expect("Should be able to get a MonoType.");
         let mut v = MonoTypeNormalizer::new();
@@ -914,7 +914,7 @@ from(bucket: v.bucket)
 |> filter(fn: (r) => r.host == "host.local")
 |> aggregateWindow(every: 30s, fn: count)
 "#;
-        let mut p = Parser::new(&source);
+        let mut p = Parser::new(source);
         let pkg: ast::Package = p.parse_file("".to_string()).into();
         let mut ty = find_var_type(&pkg, "v".to_string()).expect("should be able to find var type");
         let mut v = MonoTypeNormalizer::new();

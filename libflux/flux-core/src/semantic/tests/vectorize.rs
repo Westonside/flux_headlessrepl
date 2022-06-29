@@ -32,7 +32,7 @@ fn get_vectorized_function(pkg: &Package) -> &FunctionExpr {
                 }
             }
         },
-        Node::Package(&pkg),
+        Node::Package(pkg),
     );
     function.expect("function")
 }
