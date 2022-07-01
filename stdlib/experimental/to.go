@@ -14,7 +14,6 @@ import (
 	"github.com/influxdata/flux/runtime"
 	"github.com/influxdata/flux/stdlib/influxdata/influxdb"
 	"github.com/influxdata/flux/values"
-	lp "github.com/influxdata/line-protocol"
 )
 
 const ToKind = "experimental-to"
@@ -199,7 +198,7 @@ type tablePointsMetadata struct {
 	// Name is the measurement name for this table.
 	Name string
 	// Tags holds the tags in the table excluding the measurement.
-	Tags []*lp.Tag
+	Tags []*influxdb.Tag
 	// The column offset in the input table where the _time column is stored
 	TimestampOffset int
 	// The labels and offsets of all the fields in the table
@@ -209,7 +208,7 @@ type tablePointsMetadata struct {
 func getTablePointsMetadata(tbl flux.Table) (md tablePointsMetadata, err error) {
 	// Find measurement, tags
 	foundMeasurement := false
-	md.Tags = make([]*lp.Tag, 0, len(tbl.Key().Cols()))
+	md.Tags = make([]*influxdb.Tag, 0, len(tbl.Key().Cols()))
 	isTag := make(map[string]bool)
 	for j, col := range tbl.Key().Cols() {
 		switch col.Label {
@@ -230,7 +229,7 @@ func getTablePointsMetadata(tbl flux.Table) (md tablePointsMetadata, err error) 
 				return md, errors.Newf(codes.FailedPrecondition, "group key column %q has type %v; type %v is required", col.Label, col.Type, flux.TString)
 			}
 			isTag[col.Label] = true
-			md.Tags = append(md.Tags, &lp.Tag{
+			md.Tags = append(md.Tags, &influxdb.Tag{
 				Key:   col.Label,
 				Value: tbl.Key().ValueString(j),
 			})
@@ -290,14 +289,14 @@ func (t *ToTransformation) writeTable(tbl flux.Table) error {
 			return nil
 		}
 
-		metrics := make([]lp.Metric, 0, cr.Len())
+		metrics := make([]influxdb.Metric, 0, cr.Len())
 		for i := 0; i < cr.Len(); i++ {
 			timestamp := cr.Times(tmd.TimestampOffset).Value(i)
 			metric := &influxdb.RowMetric{
 				NameStr: tmd.Name,
 				TS:      time.Unix(0, timestamp),
 				Tags:    tmd.Tags,
-				Fields:  make([]*lp.Field, 0, len(tmd.Fields)),
+				Fields:  make([]*influxdb.Field, 0, len(tmd.Fields)),
 			}
 			for _, lao := range tmd.Fields {
 				fieldVal := execute.ValueForRow(cr, i, lao.Offset)
@@ -307,7 +306,7 @@ func (t *ToTransformation) writeTable(tbl flux.Table) error {
 					continue
 				}
 
-				metric.Fields = append(metric.Fields, &lp.Field{
+				metric.Fields = append(metric.Fields, &influxdb.Field{
 					Key:   lao.Label,
 					Value: values.Unwrap(fieldVal),
 				})

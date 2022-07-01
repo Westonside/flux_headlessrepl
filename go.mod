@@ -61,6 +61,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
+require github.com/influxdata/line-protocol/v2 v2.2.1
+
 require (
 	cloud.google.com/go/bigquery v1.8.0 // indirect
 	github.com/Azure/azure-pipeline-go v0.2.3 // indirect
