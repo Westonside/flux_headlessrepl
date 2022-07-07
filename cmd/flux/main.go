@@ -69,7 +69,7 @@ func runE(cmd *cobra.Command, args []string) error {
 
 	var opts []repl.Option
 	if flags.EnableSuggestions {
-		opts = append(opts, repl.EnableSuggestions())
+		// opts = append(opts, repl.EnableSuggestions())
 	}
 
 	if len(args) == 0 {

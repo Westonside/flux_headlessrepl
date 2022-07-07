@@ -2,18 +2,19 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"net/rpc"
+	"net/rpc/jsonrpc"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"syscall"
 
-	"github.com/c-bata/go-prompt"
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/dependency"
 	"github.com/influxdata/flux/execute"
@@ -27,7 +28,7 @@ import (
 	"github.com/influxdata/flux/values"
 )
 
-type REPL struct {
+type ScopeHolder struct {
 	ctx context.Context
 
 	scope    values.Scope
@@ -38,14 +39,14 @@ type REPL struct {
 	cancelMu   sync.Mutex
 	cancelFunc context.CancelFunc
 
-	enableSuggestions bool
+	resChan chan string
 }
 
 type Option interface {
-	applyOption(r *REPL)
+	applyOption()
 }
 
-func New(ctx context.Context, opts ...Option) *REPL {
+func New(ctx context.Context, opts ...Option) *ScopeHolder {
 	scope := values.NewScope()
 	importer := runtime.StdLib()
 	for _, p := range runtime.PreludeList {
@@ -61,7 +62,7 @@ func New(ctx context.Context, opts ...Option) *REPL {
 		panic(err)
 	}
 
-	repl := &REPL{
+	repl := &ScopeHolder{
 		ctx:      ctx,
 		scope:    scope,
 		itrp:     interpreter.NewInterpreter(nil, &lang.ExecOptsConfig{}),
@@ -69,18 +70,115 @@ func New(ctx context.Context, opts ...Option) *REPL {
 		importer: importer,
 	}
 	for _, opt := range opts {
-		opt.applyOption(repl)
+		opt.applyOption()
 	}
 	return repl
 }
 
-func (r *REPL) Run() {
-	p := prompt.New(
-		r.input,
-		r.completer,
-		prompt.OptionPrefix("> "),
-		prompt.OptionTitle("flux"),
-	)
+// type Request struct {
+// 	Jsonrpc string `json:"jsonrpc"`
+// 	Method  string `json:"method"`
+// 	Params  struct {
+// 		ContentChanges []struct {
+// 			Text string `json:"text"`
+// 		} `json:"contentChanges"`
+// 		TextDocument struct {
+// 			URI     string `json:"uri"`
+// 			Version int    `json:"version"`
+// 		} `json:"textDocument"`
+// 	} `json:"params"`
+// }
+
+type Request struct {
+	Jsonrpc string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  struct {
+		ContentChanges []struct {
+			Text string `json:"text"`
+		} `json:"contentChanges"`
+		TextDocument struct {
+			URI     string `json:"uri"`
+			Version int    `json:"version"`
+		} `json:"textDocument"`
+	} `json:"params"`
+}
+
+type Result struct {
+	Message string
+}
+
+type End struct{}
+
+// type API int
+
+type rwCloser struct {
+	io.ReadCloser
+	io.WriteCloser
+}
+
+func (rw rwCloser) Close() error {
+	err := rw.ReadCloser.Close()
+	if err := rw.WriteCloser.Close(); err != nil {
+		return err
+	}
+	return err
+}
+
+type Response struct {
+	Result string
+}
+
+type Testing struct {
+	A string `json:"input"`
+}
+
+type Item struct { //return type
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Param Params `json:"params"`
+}
+
+type Thing struct {
+	Name string `json:"name"`
+}
+
+type Params struct {
+	Input Input `json:"params"`
+}
+type Input []struct {
+	Text string `json:"input"`
+}
+
+type Service struct {
+	c   chan string
+	res chan string
+}
+
+// {"jsonrpc":"2.0", "method": "Service.DidOutput", "id": "1", "title":"testing","body":"dog", "params":[{"input":"x=1"}]}
+// {"jsonrpc":"2.0", "method": "Service.DidOutput", "id": "1", "title":"testing","body":"dog", "params":[{"input":"x"}]}
+// {"jsonrpc":"2.0", "method": "Service.Hello", "id": "1", "params":[1]}
+// {"jsonrpc":"2.0", "method": "Service.Hello", "id": "1", "params":[], "name":"wez"}
+
+func (s *Service) DidOutput(req Testing, resp *Response) error {
+	s.c <- req.A
+	result := <-s.res
+	fmt.Println("got the result!!!", result)
+	*resp = Response{result}
+	return nil
+}
+
+type API int
+
+func (r *ScopeHolder) Run() {
+	// var api = new(API)
+	s := rpc.NewServer()
+	c := make(chan string)
+	//for the input result
+	calc_chan := make(chan string)
+	r.resChan = calc_chan
+
+	serv := Service{c, calc_chan}
+	s.Register(&serv)
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	go func() {
@@ -88,10 +186,20 @@ func (r *REPL) Run() {
 			r.cancel()
 		}
 	}()
-	p.Run()
+
+	go s.ServeCodec(jsonrpc.NewServerCodec(rwCloser{os.Stdin, os.Stdout})) //somehow need to get the input that is being
+	for {
+		res := <-c
+		r.input(res) //check if something is outputted and send back through the channel
+	}
+
 }
 
-func (r *REPL) cancel() {
+func newServer() {
+	panic("unimplemented")
+}
+
+func (r *ScopeHolder) cancel() {
 	r.cancelMu.Lock()
 	defer r.cancelMu.Unlock()
 	if r.cancelFunc != nil {
@@ -100,59 +208,25 @@ func (r *REPL) cancel() {
 	}
 }
 
-func (r *REPL) setCancel(cf context.CancelFunc) {
+func (r *ScopeHolder) setCancel(cf context.CancelFunc) {
 	r.cancelMu.Lock()
 	defer r.cancelMu.Unlock()
 	r.cancelFunc = cf
 }
-func (r *REPL) clearCancel() {
+func (r *ScopeHolder) clearCancel() {
 	r.setCancel(nil)
 }
 
-func (r *REPL) completer(d prompt.Document) []prompt.Suggest {
-	if r.enableSuggestions {
-		names := make([]string, 0, r.scope.Size())
-		r.scope.Range(func(k string, v values.Value) {
-			names = append(names, k)
-		})
-		sort.Strings(names)
-
-		s := make([]prompt.Suggest, 0, len(names))
-		for _, n := range names {
-			if n == "_" || !strings.HasPrefix(n, "_") {
-				s = append(s, prompt.Suggest{Text: n})
-			}
-		}
-		if d.Text == "" || strings.HasPrefix(d.Text, "@") {
-			root := "./" + strings.TrimPrefix(d.Text, "@")
-			fluxFiles, err := getFluxFiles(root)
-			if err == nil {
-				for _, fName := range fluxFiles {
-					s = append(s, prompt.Suggest{Text: "@" + fName})
-				}
-			}
-			dirs, err := getDirs(root)
-			if err == nil {
-				for _, fName := range dirs {
-					s = append(s, prompt.Suggest{Text: "@" + fName + string(os.PathSeparator)})
-				}
-			}
-		}
-
-		return prompt.FilterHasPrefix(s, d.GetWordBeforeCursor(), true)
-	}
-	return nil
-
-}
-
-func (r *REPL) Input(t string) (*libflux.FluxError, error) {
-	return r.executeLine(t)
+func (r *ScopeHolder) Input(t string) (*libflux.FluxError, error) {
+	a, err := r.executeLine(t)
+	return a, err
 }
 
 // input processes a line of input and prints the result.
-func (r *REPL) input(t string) {
+func (r *ScopeHolder) input(t string) {
 	if fluxError, err := r.executeLine(t); err != nil {
 		if fluxError != nil {
+
 			fluxError.Print()
 		} else {
 			fmt.Println("Error:", err)
@@ -160,12 +234,12 @@ func (r *REPL) input(t string) {
 	}
 }
 
-func (r *REPL) Eval(t string) ([]interpreter.SideEffect, error) {
+func (r *ScopeHolder) Eval(t string) ([]interpreter.SideEffect, error) {
 	s, _, err := r.evalWithFluxError(t)
 	return s, err
 }
 
-func (r *REPL) evalWithFluxError(t string) ([]interpreter.SideEffect, *libflux.FluxError, error) {
+func (r *ScopeHolder) evalWithFluxError(t string) ([]interpreter.SideEffect, *libflux.FluxError, error) {
 	if t == "" {
 		return nil, nil, nil
 	}
@@ -192,7 +266,7 @@ func (r *REPL) evalWithFluxError(t string) ([]interpreter.SideEffect, *libflux.F
 
 // executeLine processes a line of input.
 // If the input evaluates to a valid value, that value is returned.
-func (r *REPL) executeLine(t string) (*libflux.FluxError, error) {
+func (r *ScopeHolder) executeLine(t string) (*libflux.FluxError, error) {
 	ses, fluxError, err := r.evalWithFluxError(t)
 	if err != nil {
 		return fluxError, err
@@ -217,15 +291,26 @@ func (r *REPL) executeLine(t string) (*libflux.FluxError, error) {
 					return nil, err
 				}
 			} else {
-				values.Display(os.Stdout, se.Value)
-				fmt.Println()
+				//SEND THE THING HERE
+
+				// s := ""
+				var a []byte
+				buf := bytes.NewBuffer(a)
+				values.Display(buf, se.Value)
+				fmt.Println(buf.String(), "is the result")
+				//send flux result
+				if buf.String() == "" {
+					println("nothing")
+				}
+				r.resChan <- buf.String()
+				// fmt.Println(buf.String(), "testing")
 			}
 		}
 	}
 	return nil, nil
 }
 
-func (r *REPL) analyzeLine(t string) (*semantic.Package, *libflux.FluxError, error) {
+func (r *ScopeHolder) analyzeLine(t string) (*semantic.Package, *libflux.FluxError, error) {
 	pkg, fluxError := r.analyzer.AnalyzeString(t)
 	if fluxError != nil {
 		return nil, fluxError, fluxError.GoError()
@@ -239,7 +324,7 @@ func (r *REPL) analyzeLine(t string) (*semantic.Package, *libflux.FluxError, err
 	return x, nil, err
 }
 
-func (r *REPL) doQuery(ctx context.Context, spec *flux.Spec) error {
+func (r *ScopeHolder) doQuery(ctx context.Context, spec *flux.Spec) error {
 	// Setup cancel context
 	ctx, cancelFunc := context.WithCancel(ctx)
 	r.setCancel(cancelFunc)
@@ -320,14 +405,8 @@ func LoadQuery(q string) (string, error) {
 	return q, nil
 }
 
-type option func(r *REPL)
+type option func(r *ScopeHolder)
 
-func (o option) applyOption(r *REPL) {
+func (o option) applyOption(r *ScopeHolder) {
 	o(r)
-}
-
-func EnableSuggestions() Option {
-	return option(func(r *REPL) {
-		r.enableSuggestions = true
-	})
 }
