@@ -162,7 +162,6 @@ type Service struct {
 func (s *Service) DidOutput(req Testing, resp *Response) error {
 	s.c <- req.A
 	result := <-s.res
-	fmt.Println("got the result!!!", result)
 	*resp = Response{result}
 	return nil
 }
@@ -297,11 +296,8 @@ func (r *ScopeHolder) executeLine(t string) (*libflux.FluxError, error) {
 				var a []byte
 				buf := bytes.NewBuffer(a)
 				values.Display(buf, se.Value)
-				fmt.Println(buf.String(), "is the result")
 				//send flux result
-				if buf.String() == "" {
-					println("nothing")
-				}
+
 				r.resChan <- buf.String()
 				// fmt.Println(buf.String(), "testing")
 			}
